@@ -1,0 +1,305 @@
+---
+title: "Análise dos dados 'FEV' "
+author: "Arthur Cesar Rocha (94361)"
+date: "8 de outubro de 2018"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Introdução
+
+A professora Dra. Isolde Previdelli nos passou um banco de dados FEV para aprimorarmos os conhecimentos nas aplicações de modelos mistos.
+O banco de dados conta com a variável resposta FEV, referente a uma qualidade respiratória, que foi medida ao longo de 8 horas além da medição pré intervenção das drogas A,C e placebo.
+Por se tratar de um problema de dados longitudinais (a ordem do tempo importa), foram feitas algumas análises, além da descritiva, com abordagens diferentes, sendo algumas equivocadas (não considerando a dependência) e a parte de modelos mistos.
+Os modelos lineares mistos são uma extensão dos modelos lineares, em que é possível assumir uma parte de efeitos aleatórios no modelo além da parte de efeitos fixos, permitindo assim a composição de uma estrutura de covariância (dependência) na análise.
+
+
+## Leitura e manejo dos dados
+
+### Pacotes
+```{r message=FALSE, warning=FALSE}
+library(dplyr)    #Manipulação
+library(magrittr) #Manipulação
+library(tidyr)    #Transformar dados para long
+library(ggplot2)  #Gráficos
+library(corrplot) #Gráfico matriz de correlação
+library(nlme)     #Modelos mistos
+```
+
+
+```{r pressure, echo=FALSE}
+setwd("C:\\Users\\ASUS\\Desktop\\Uem\\4 ano\\Modelos Mistos")
+iniciais <- read.table(file = "dados fev1.txt", header = T, dec = ".")
+
+dados <- reshape(data = iniciais, varying = 2:10, v.names = "y", timevar = "hora",
+                  idvar = c("patient", "drug"), direction = "long"); 
+
+dados1 <- reshape(data = iniciais, varying = 3:10, v.names = "y", timevar = "hora",
+                 idvar = c("patient", "drug"), direction = "long");
+
+dados$hora = factor(dados$hora)
+dados1$hora = factor(dados1$hora)
+dados1$patient = factor(dados1$patient)
+dados1$drug = factor(dados1$drug)
+
+```
+
+
+## Análise descritiva
+
+O primeiro passo de uma análise é verificar o comportamento dos dados de forma descritiva, portanto essa sessão é dedicada a esse fim.
+
+### Matriz de correlação amostral:
+```{r}
+##Matriz de correlação amostral
+iniciais %>%
+  select(-c(patient,drug)) %>%
+  cor() %>% 
+  round(digits = 2)
+
+#Gráfico da matriz de correlação
+iniciais %>%
+  select(-c(patient,drug)) %>%
+  cor() %>%
+  corrplot(type = "upper",method = "number",
+           tl.col = "black",diag = F)
+
+```
+
+Verifica-se que parece ser razoavel aceitar que a correlação é aproximadamente constante entre os tempos próximos, ou que decai lentamente conforme o tempo, o que faz sentido do ponto de vista de dados longitudinais.
+
+
+### Medidas descritivas de cada grupo
+
+```{r}
+dados %$%
+  tapply(y, drug, summary)
+```
+ Nota-se um desempenho aparentemente superior da droga a e c, não tendo muita diferença em suas distribuições, ao contrário da droga p, que apresentou as medidas de posição um pouco abaixo das demais.
+
+
+```{r}
+dados %>%
+  ggplot(aes(hora,y,fill=drug))+
+  geom_boxplot()+
+  theme_minimal()
+```
+
+
+Ao se analisar o comportamento da resposta conforme a droga e a hora, nota-se que há um pico na resposta na hora de aplicação (hora 2) e depois há uma queda e estabilização.
+```{r}
+##Gráfico de perfis
+
+dados %>%
+  mutate(drug=factor(drug,levels = levels(drug),
+                     labels = c("DRUG A.","DRUG C.","DRUG P."))) %>%
+  group_by(drug,hora) %>%
+  mutate(MEAN=mean(y,na.rm = T)) %>%
+  ggplot(aes(x=hora,y=y,group=patient))+
+  geom_point(alpha=.4)+
+  geom_line(alpha=.4)+
+  geom_line(aes(x=hora,y=MEAN),col=2, size=1.2,show.legend = T)+
+  geom_point(aes(x=hora,y=MEAN),col=2, size=2)+
+  theme_light()+
+  facet_wrap(~drug)+
+  annotate(geom="text",x=2,y=1,label="-- : Mean",col=2,fontface=2)
+
+
+```
+
+A partir dos gráficos de perfis é possível perceber que o intercepto é diferente para cada indivíduo, isto é, cada paciente começa com uma resposta distinta. Além disso, constata-se o que foi visto anteriormente de que as maiores médias da resposta são de indivíduos que utilizaram a droga C e A, respectivamente.
+
+## Modelos
+
+Primeiramente será feita uma análise considerando modelos mais simples e posteriormente modelos mistos serão aplicados nos dados
+
+## Análises de variâncias 
+
+```{r}
+## - ANOVA one way - errado -
+
+modelo1=aov(y~drug,data = dados1)
+modelo1 %>% 
+  summary()
+
+TukeyHSD(modelo1,which = "drug")
+
+## - ANOVA two way - errado -
+
+modelo2=aov(y~drug+hora,data = dados1)
+modelo2 %>% summary()
+
+TukeyHSD(modelo2,which = "drug")
+```
+
+Esses dois modos equivocados de análise, por conta de não considerar a dependência presente nos dados, tiveram resultados similares, em que foi possível averiguar significância no efeito da droga e da hora.
+
+```{r}
+## - ANOVA com indivíduo como bloco -
+
+modelo3=aov(y~drug*hora+patient+basefev1,data = dados1)
+modelo3 %>% summary()
+
+TukeyHSD(modelo3,which = 'drug')
+
+```
+
+Ao se considerar o paciente como bloco, é possível retirar um possível efeito de dependência. 
+
+
+```{r}
+## - ANOVA para medidas repetidas -
+
+modelo4=aov(y ~ basefev1+ drug*hora + Error(patient/hora),data=dados1)
+
+modelo4 %>% summary()
+TukeyHSD(modelo4,wich="drug")
+```
+
+Considerando que a estrutura de covariância é esférica, torna-se viável considerar esse modelo. É possível perceber significância nos efeitos fixos e também no erro composto.
+
+
+## Modelos mistos:
+
+### Modelo com estrutura de covariância Compound Symmetry
+
+
+```{r}
+mixed1=lme(y ~ basefev1+hora*drug, random= ~1 | patient, method="REML",correlation = corCompSymm(),data=dados1)
+
+anova(mixed1)
+cat("\n AIC:",AIC(mixed1))
+
+```
+
+Considerando que a estrutura de covariância é esférica, torna-se viável considerar esse modelo. É possível perceber significância nos efeitos fixos e aleatórios.
+
+#### Post- hoc
+
+```{r}
+library(multcomp)
+summary(glht(mixed3, linfct = mcp(drug = "Tukey")), test = adjusted("holm"))
+```
+
+
+### Modelo com estrutura de covariância AR(1)
+```{r}
+mixed2=lme(y ~ basefev1+hora*drug, random= ~1 | patient, method="REML",correlation = corAR1(),data=dados1)
+
+anova(mixed2)
+
+cat("\n AIC:",AIC(mixed2))
+
+mixed3=lme(y ~ basefev1+hora*drug, random= ~1 | patient, method="REML",correlation = corSymm(),data=dados1,control = list(maxIter=200,msMaxIter=200))
+
+anova(mixed3)
+
+cat("\n AIC:",AIC(mixed3))
+
+
+
+
+``` 
+
+```{r}
+summary(glht(mixed2, linfct = mcp(drug = "Tukey")), test = adjusted("holm"))
+```
+
+### Modelo com estrutura de covariância não estruturada
+
+### Não convergiu
+
+### Modelo com estrutura de covariância Toeplitz
+
+### Não tinha implementado no R (não trivial)
+
+
+## Teste da razão entre verossimilhanças
+
+Para verificar qual a estrutura de covariância pode ser escolhida é usual utilizar o teste da razão entre verossimilhanças, desde que se tratem de estruturas "aninhadas", isto é, uma pode ser escrita como caso particular da outra.
+
+```{r}
+anova.lme(mixed1,mixed2,test = T)
+```
+
+
+Adotando a classe de modelos mistos com estruturas de covariância CS e AR(1), verifica-se que o segundo tem menor AIC e pela forma da estrutura da matriz de correlação amostral parece ser mais adequado.
+
+
+```{r}
+anova(mixed2,mixed3)
+
+```
+
+## Análise de resíduos
+
+```{r}
+residuo = function(modelo){
+  par(mfrow=c(2,2))
+
+modelo$residuals %>%
+  qqnorm(main="Resíduo de efeitos fixos")
+  qqline(modelo$residuals)
+
+modelo$residuals %>%
+  hist(main="Resíduo de efeitos fixos")  
+
+
+plot(as.numeric(modelo$groups[,1]),modelo$residuals[,1],type = "p",xlab = "Paciente")  
+plot(as.numeric(dados1$hora),modelo$residuals[,1],type = "p",xlab= "Hora")  
+plot(modelo)
+  }
+
+res.aleat = function(modelo){
+par(mfrow= c(1,2))
+ranef(modelo)[,1] %>%
+  qqnorm(main="Resíduo de efeitos aleatórios")
+  qqline(ranef(modelo))
+
+ranef(modelo)[,1] %>%
+  hist(main="Resíduo de efeitos aleatórios")  
+
+ranef(modelo) %>% plot()
+}
+
+```
+
+- Modelo 1
+
+```{r}
+mixed1 %>%
+  residuo
+
+plot(mixed1)
+
+mixed1 %>% 
+  res.aleat
+
+ranef(mixed1) %>% plot()
+```
+
+
+- Modelo 2
+
+```{r}
+mixed2 %>%
+  residuo
+
+mixed2 %>%
+  res.aleat
+```
+
+
+- Modelo 3
+
+```{r}
+mixed3 %>%
+  residuo
+
+mixed3 %>%
+  res.aleat
+```
+
