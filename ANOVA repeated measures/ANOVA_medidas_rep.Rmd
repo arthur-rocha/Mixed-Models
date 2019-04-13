@@ -1,0 +1,183 @@
+---
+title: "ANOVA de medidas repetidas"
+output:
+  prettydoc::html_pretty:
+    theme: black
+    highlight: github
+---
+ <center> 
+ 
+ <img src="https://botw-pd.s3.amazonaws.com/styles/logo-thumbnail/s3/0014/7093/brand.gif?itok=zFlrirK_" width="50" height="50" />
+ <big> **Universidade Estadual de Maringá - Modelos Mistos** </big>
+</center>
+
+ - Aluno: Arthur Cesar Rocha
+ - Professora: Isolde Previdelli
+
+
+## Objetivo
+
+Replicar a análise vista em sala de aula para os dados de tratamento de pressão alta.
+
+## Dados
+
+- Pacotes
+```{r message=FALSE, warning=FALSE}
+library(dplyr) # Manipulação
+library(tidyr) # Manipulação
+library(magrittr) # Manipulação
+library(broom)    # Manipulação
+library(nlme)     # Modelo misto
+```
+
+- Leitura e transformação
+
+Antes de mais nada é preciso transformar os dados do formato **wide** para **long**.
+
+```{r}
+dados=read.table(header=T,text = "
+              Subject Baseline Placebo Trt_A Trt_B
+              01 113 108 98 103
+              02 108 110 96 104
+              03 110 106 110 107
+              04 99 98 78 88
+              05 114 114 112 105
+              06 109 103 88 97
+              07 113 110 106 103
+              08 112 108 99 108
+              09 121 111 96 115
+              10 98 103 98 107
+              11 107 104 98 100
+              12 123 117 97 103
+              13 112 109 108 114
+              14 96 94 99 97
+              15 108 106 101 101
+              16 111 99 102 87
+              17 124 130 121 124
+              18 113 119 101 114
+              19 106 99 89 90
+              20 99 94 85 59")
+
+dados<-gather(dados,key = "Tratamento",
+       value ="Pressão", -Subject)
+
+dados$Tratamento = factor(dados$Tratamento)
+dados$Subject = factor(dados$Subject)
+
+```
+
+
+
+
+## Análise
+
+Aqui serão feitas 4 análises com técnicas diferentes para esse problema.
+
+- Para todos os casos a variável resposta é **Pressão**
+
+### ANOVA one-way
+
+Neste caso supõe-se independência das observações, além da distribuição aproximadamente normal. Assumindo um modelo da forma:
+
+
+$$y_{ij}=\mu + \tau_j + \epsilon_{ij}$$
+
+```{r}
+dados%$%
+aov(Pressão ~ Tratamento) %>%
+tidy %>%
+knitr::kable()
+```
+
+Foi possível observar significância no tratamento ($\alpha=0,05$) a partir desse método.
+
+- Post-hoc (Tukey)
+
+Para verificar quais médias diferem, fez-se um teste de Tukey para comparações múltiplas.
+
+```{r}
+dados%$%
+aov(Pressão ~ Tratamento) %>%
+TukeyHSD() %>%
+ tidy() %>%
+ knitr::kable()
+```
+
+Aqui é possível interpretar a 5% de significância que os tratamentos A e B diferem do baseline, porém não diferem do placebo. Também é visível que esses dois tratamentos não diferem entre si, da mesma forma que o baseline não difere do placebo.
+
+### ANOVA com blocos (two-way)
+
+Uma das formas de separar a variabilidade de cada indivíduo é assumindo cada um deles como bloco no delineamento, ficando com um modelo da forma:
+
+$$y_{ij}=\mu + \tau_j + \beta_i + \epsilon_{ij}$$
+
+
+```{r}
+dados%$%
+aov(Pressão ~ Tratamento + Subject) %>%
+tidy %>%          #transforma em dataframe
+knitr::kable()    #faz tabela html
+```
+
+Os resultados dessa análise de variância são similares ao anterior, havendo significância para o tratamento, considerando $\alpha =$ 5% , também é visível que foi atribuida uma parte grande da variância residual para os indivíduos, indicando que são importantes na análise.
+
+- Post-hoc (Tukey)
+
+
+```{r}
+dados%$%
+aov(Pressão ~ Tratamento + Subject) %>%
+TukeyHSD(which = "Tratamento") %>%
+tidy %>%          
+knitr::kable()
+```
+Vê-se aqui que os tratamentos A e B diferem do placebo e baseline mas não diferem entre si.
+
+### ANOVA para medidas repetidas (one-way)
+
+Esse método considera uma estrutura de covariância no delineamento, na forma de simetria composta, isto é, a matiz de covariância / correlação tem valores constantes iguais. No mais é similar ao caso anterior, em que a soma de quadrado é decomposta entre e dentre os indivíduos.
+
+```{r}
+dados %$%
+aov(Pressão ~ Tratamento + Error(Subject/Tratamento)) %>%
+summary 
+```
+
+O resultado é análogo, tendo significância de tratamento considerando $\alpha=5%$.
+
+### Teste de Friedman (não paramétrico)
+
+É possível abordar o problema de um ponto de vista não paramétrico, utilizando o teste de Friedman e seu post-hoc.
+```{r message=FALSE, warning=FALSE}
+#Código com a função
+source("C:\\Users\\ASUS\\Desktop\\Uem\\4 ano\\Modelos Mistos\\friedman_post.R")
+
+friedman_test_post(Pressão~Tratamento | Subject,data=dados, to.plot.parallel = F) 
+```
+
+
+O resultado desse teste é de que os tratamentos são diferentes, difereciando o A e B do baseline, mas apenas o A difere do placebo. Além disso, A e B não diferem.
+
+### Modelo Misto
+
+Aqui considera-se um efeito aleatório para cada indivíduo, colocando esse efeito no intercepto.
+
+```{r message=FALSE, warning=FALSE}
+lme(Pressão ~ Tratamento, random=~1 | Subject, method="ML", data=dados) %>%
+  anova %>%
+  knitr::kable()
+```
+
+Percebe-se que neste caso o resultado também é de significância do tratamento e do intercepto aleatório.
+
+- Post-hoc (Tukey)
+
+```{r}
+lme(Pressão ~ Tratamento, random=~1 | Subject, method="ML", data=dados) %>%
+  glht(linfct=mcp(Tratamento="Tukey")) %>%
+  summary() %>%
+  tidy %>%
+  knitr::kable()
+```
+
+Aqui percebe-se que, a 5% de significância os tratamentos A e B diferem do placebo e baseline mas não diferem entre si.
