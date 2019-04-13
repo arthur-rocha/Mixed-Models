@@ -1,0 +1,203 @@
+---
+title: "Análise dos dados sobre Chumbo - Modelos mistos"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: black
+    highlight: github
+---
+
+ <center> 
+ 
+ <img src="https://botw-pd.s3.amazonaws.com/styles/logo-thumbnail/s3/0014/7093/brand.gif?itok=zFlrirK_" width="50" height="50" />
+ <big> **Universidade Estadual de Maringá - Modelos Mistos** </big>
+</center>
+
+ - Aluno: Arthur Cesar Rocha
+ - Professora: Isolde Previdelli
+
+--- 
+
+# Leitura e transformação dos dados
+
+```{r message=FALSE, warning=FALSE}
+#Pacotes
+library(magrittr) #Manipulação
+library(tidyr)    #Manipulação
+library(dplyr)    #Manipulação
+library(nlme)     #Modelos mistos
+library(ggplot2)  #Gráficos
+
+setwd("C:\\Users\\ASUS\\Desktop\\Uem\\4 ano\\Modelos Mistos\\Slides e materiais")
+
+dados= read.table("chumbo.txt",header = T)
+
+## - Formato Long -
+dados2=
+dados %>%
+gather(key=Tempo ,value = Chumbo, -c(ID, TRT)) %>%
+mutate(Tempo = case_when( Tempo == "PbB1" ~ 0,
+                          Tempo == "PbB2" ~ 1,
+                          Tempo == "PbB3" ~ 4,
+                          Tempo == "PbB4" ~ 6),
+       TRT = case_when(TRT== "P" ~ "Placebo",
+                       TRT== "A" ~ "Tratamento"),
+       TRT = factor(TRT))
+
+## - Utilizando a baseline como variável -
+dados3=
+  dados %>%
+  gather(key=Tempo ,value = Chumbo, -c(ID, TRT,PbB1)) %>%
+  mutate(Tempo = case_when( Tempo == "PbB2" ~ 1,
+                            Tempo == "PbB3" ~ 4,
+                            Tempo == "PbB4" ~ 6),
+         TRT = case_when(TRT== "P" ~ "Placebo",
+                         TRT== "A" ~ "Tratamento"))
+```
+
+ 
+# Análise exploratória
+
+```{r}
+## Matriz de correlação
+dados%>%
+  select(-c(ID,TRT)) %>%
+  cor() %>%
+  highcharter::hchart()
+  # corrplot::corrplot.mixed(upper = "shade",tl.col=1, col = rainbow(15,start = .8, end = 1))
+```
+
+---
+
+```{r}
+## Boxplots
+dados2 %>%
+  ggplot(aes(TRT,Chumbo))+
+  geom_boxplot()+
+  theme_minimal()
+```
+
+A partir da figura acima é possível perceber que, no geral, os pacientes que receberam tratamento apresentaram uma quantidade menor de chumbo no sangue.
+
+---
+
+```{r}
+dados2 %>%
+  ggplot(aes(factor(Tempo),Chumbo,fill=TRT))+
+  geom_boxplot()+
+  theme_minimal()+
+  xlab("Tempo")+
+  scale_fill_discrete("Tratamento")
+```
+
+Vê-se aqui novamente a disparidade entre os tratamentos propostos, sendo o placebo inferior em eficácia aparentemente em todos os tempos estudados, destacando-se o período de 1 semana, em que há maior diferença entre as distribuições de chumbo dos dois tratamentos. 
+Nota-se também que a partir de 4 semanas o tratamento parece começar a perder o efeito.
+
+---
+
+```{r message=FALSE, warning=FALSE}
+## Perfis
+dados2%>%
+  group_by(Tempo,TRT) %>%
+  mutate(Média = mean(Chumbo))%>%
+  ggplot(aes(Tempo,Chumbo, group=ID)) + 
+  geom_line(alpha=.5) +
+  geom_point(size=2,alpha=.7)+
+  facet_wrap(~TRT)+
+  geom_line(aes(Tempo,Média,
+                group=ID,fill="Média"),
+                col ="blue",show.legend=T) +
+  geom_point(aes(Tempo,Média,group=ID,fill="Média"),size=2,color="blue")+
+  theme_light() +
+  theme(legend.position = "bottom") + scale_fill_discrete("")
+
+```
+
+Como visto no gráfico anterior, nota-se que em média o nível de chumbo dos pacientes do grupo com tratamento é menor em todos os tempos, inclusive no tempo inicial. Disto entende-se que os indivíduos tem um início diferente no nível de chumbo inicial.
+
+
+# Modelagem
+
+## Modelo misto com tempo categórico
+
+```{r}
+dados2 %$%
+lme(Chumbo ~ TRT*factor(Tempo),random = ~ 1|factor(ID)) -> modelo1
+
+summary(modelo1)
+
+```
+
+---
+
+
+## Modelo misto com tempo numérico
+
+```{r}
+dados2 %$%
+  lme(Chumbo ~ TRT*Tempo,random = ~ 1|factor(ID)) -> modelo2
+
+summary(modelo2)
+```
+
+---
+## Comparação
+
+```{r}
+anova(modelo1,modelo2)
+```
+
+---
+
+
+## Modelo misto com tempo categórico considerando baseline como covariável
+
+```{r}
+dados3 %$%
+  lme(Chumbo ~ TRT*factor(Tempo) + PbB1,
+      random = ~ 1|factor(ID)) -> modelo3
+
+summary(modelo3)
+```
+
+---
+
+## Modelo misto com tempo numérico considerando baseline como covariável
+
+```{r}
+dados3 %$%
+  lme(Chumbo ~ TRT*Tempo + PbB1,
+      random = ~ 1|factor(ID)) -> modelo4
+
+summary(modelo4)
+```
+
+---
+
+## Modelo misto com efeito aleatório no intercepto + slope
+
+```{r}
+dados2 %$%
+  lme(Chumbo ~ TRT*Tempo,random = ~1 + Tempo|factor(ID)) %>%
+  summary()
+```
+
+## Modelo misto com efeito aleatório no tempo (slope)
+
+```{r}
+dados2 %$%
+  lme(Chumbo ~ TRT*factor(Tempo),random = ~1 + factor(Tempo)|factor(ID)) %>%
+  summary()
+```
+
+
+```{r}
+dados2 %$%
+  lme(Chumbo ~ TRT*factor(Tempo),random = ~1 + factor(Tempo)|factor(ID)) ->mod1
+
+dados2 %$%
+  lme(Chumbo ~ TRT*factor(Tempo),random = ~1|factor(ID))-> mod2
+
+anova(mod1,mod2)
+```
+
