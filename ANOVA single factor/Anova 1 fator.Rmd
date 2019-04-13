@@ -1,0 +1,51 @@
+---
+title: "Exemplo Análise de Variância"
+output: html_notebook
+---
+
+##Exemplo (simulado):
+> Um produtor de soja deseja saber se existe efeito da fonte de adubo no tamanho final da semente (mm). Considerando as fontes de adubo A,B e C. Define-se
+
+> **Variável Resposta:** Tamanho da semente;
+> 
+> **Unidade Observacional:** Semente de soja;
+
+###Simulando dados:
+
+```{r}
+set.seed(1234)
+
+Fontes=rep(LETTERS[1:3],each=4)
+Medida=c(rnorm(4,mean = 3,sd = .4),rnorm(4,mean = 3.5,sd = .4),
+         rnorm(4,mean = 6,sd = .5))
+
+```
+
+###Hipóteses Consideradas:
+
+$H_0:$Não existe efeito da fonte de adubo;
+$H_1:$Existe efeito da fonte de adubo;
+
+###Tabela de ANOVA
+
+```{r}
+library(dplyr)
+
+aov(Medida~Fontes) %>% anova
+
+```
+
+###Conclusão:
+> Como o valor-p < 0,005 há evidências a 5% de significância para se rejeitar a hipótese de igualdade de médias, isto é, existe efeito da fonte de adubo no tamanho da semente.
+
+###Post hoc (Tukey)
+
+> **Objetivo**: Verificar em quais níveis da covariável fonte existe diferença significativa na resposta:
+
+
+```{r}
+par(bg="grey79",col.axis='grey40')
+aov(Medida~Fontes) %>% TukeyHSD() %>%
+  plot(col="grey23")
+```
+
